@@ -11,23 +11,52 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.image_label }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - image_suffix: ""
             dockerfile: Dockerfile
             image_label: "OpenClaw Gateway"
+            arch: "amd64"
+            platform: "linux/amd64"
+            runner: "ubuntu-latest"
+          - image_suffix: ""
+            dockerfile: Dockerfile
+            image_label: "OpenClaw Gateway"
+            arch: "arm64"
+            platform: "linux/arm64"
+            runner: "ubuntu-24.04-arm"
           - image_suffix: "-sandbox"
             dockerfile: Dockerfile.sandbox
             image_label: "OpenClaw Sandbox"
+            arch: "amd64"
+            platform: "linux/amd64"
+            runner: "ubuntu-latest"
+          - image_suffix: "-sandbox"
+            dockerfile: Dockerfile.sandbox
+            image_label: "OpenClaw Sandbox"
+            arch: "arm64"
+            platform: "linux/arm64"
+            runner: "ubuntu-24.04-arm"
           - image_suffix: "-sandbox-browser"
             dockerfile: Dockerfile.sandbox-browser
             image_label: "OpenClaw Sandbox Browser"
+            arch: "amd64"
+            platform: "linux/amd64"
+            runner: "ubuntu-latest"
+          - image_suffix: "-sandbox-browser"
+            dockerfile: Dockerfile.sandbox-browser
+            image_label: "OpenClaw Sandbox Browser"
+            arch: "arm64"
+            platform: "linux/arm64"
+            runner: "ubuntu-24.04-arm"
 
     steps:
       - name: Checkout repository
@@ -51,15 +80,57 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,format=long
+            type=raw,value=${{ matrix.arch }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
+          platforms: ${{ matrix.platform }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          provenance: false
+
+  merge-manifests:
+    name: Merge Manifests (${{ matrix.image_label }})
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image_suffix: ""
+            image_label: "OpenClaw Gateway"
+          - image_suffix: "-sandbox"
+            image_label: "OpenClaw Sandbox"
+          - image_suffix: "-sandbox-browser"
+            image_label: "OpenClaw Sandbox Browser"
+    steps:
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
+          tags: |
+            type=ref,event=branch
+
+      - name: Create and push manifest
+        run: |
+          IMAGE_BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}"
+          TAG="main"
+          docker buildx imagetools create -t ${IMAGE_BASE}:${TAG} \
+            ${IMAGE_BASE}:amd64 \
+            ${IMAGE_BASE}:arm64
