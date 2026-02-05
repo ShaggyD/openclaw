@@ -129,7 +129,8 @@ jobs:
 
       - name: Create and push manifest
         run: |
-          IMAGE_BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}"
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_BASE="${{ env.REGISTRY }}/${REPO_LOWER}${{ matrix.image_suffix }}"
           TAG="main"
           docker buildx imagetools create -t ${IMAGE_BASE}:${TAG} \
             ${IMAGE_BASE}:amd64 \
